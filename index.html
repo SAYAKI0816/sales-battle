@@ -628,14 +628,62 @@ document.getElementById('url-prod').addEventListener('input',e=>{
 });
 function chkReady(){ document.getElementById('ai-start-btn').disabled=!(selPersona&&selProduct); }
 
-// ---- API ----
-async function callClaude(messages, sys){
-  const r = await fetch('https://api.anthropic.com/v1/messages',{
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,system:sys,messages})
+// ---- GEMINI API (7キー・10回で自動ローテーション) ----
+const GEMINI_KEYS = [
+  'AIzaSyDXFAKpbNcNaz_0vI6hF8D31kacLftQ3-g',
+  'AIzaSyA8x_jUAvyR4rQh53ihT_-VWXi_Hdr8Bvo',
+  'AIzaSyDEpbK5IvSGpI2J9HtazG1pPx7xes3hfhw',
+  'AIzaSyBvFPYyFVONCUG2RJbQdHgi2m-yHs-frMA',
+  'AIzaSyCS42kYIZzsd6IGt_NBCv1MlDXdsoi7z08',
+  'AIzaSyDxj2cbDBUXICYG4vSDCpWAG0tk1_hFbNg',
+  'AIzaSyDxj2cbDBUXICYG4vSDCpWAG0tk1_hFbNg'
+];
+let geminiKeyIndex = 0;
+let geminiCallCount = 0;
+const ROTATE_EVERY = 10;
+
+function getGeminiKey() {
+  if (geminiCallCount > 0 && geminiCallCount % ROTATE_EVERY === 0) {
+    geminiKeyIndex = (geminiKeyIndex + 1) % GEMINI_KEYS.length;
+    console.log('🔑 APIキーをローテーション → Key', geminiKeyIndex + 1);
+  }
+  geminiCallCount++;
+  return GEMINI_KEYS[geminiKeyIndex];
+}
+
+async function callClaude(messages, sys) {
+  const key = getGeminiKey();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
+
+  // Convert message history to Gemini format
+  const geminiContents = [];
+  for (const m of messages) {
+    if (m.role === 'user') {
+      geminiContents.push({ role: 'user', parts: [{ text: m.content }] });
+    } else if (m.role === 'assistant') {
+      geminiContents.push({ role: 'model', parts: [{ text: m.content }] });
+    }
+  }
+
+  const body = {
+    system_instruction: { parts: [{ text: sys }] },
+    contents: geminiContents,
+    generationConfig: { maxOutputTokens: 1000, temperature: 0.9 }
+  };
+
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
   });
-  if(!r.ok) throw new Error('API error');
-  return (await r.json()).content[0].text;
+
+  if (!r.ok) {
+    const err = await r.json();
+    throw new Error('Gemini API error: ' + (err.error?.message || r.status));
+  }
+
+  const data = await r.json();
+  return data.candidates[0].content.parts[0].text;
 }
 function getSys(persona){
   return `あなたは「セールスバトル」という営業ロープレゲームのAI顧客役です。
